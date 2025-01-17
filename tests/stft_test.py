@@ -38,7 +38,7 @@ sx_filtered_db = 20 * np.log10(np.abs(sx_filtered) + 1e-10)  # Adding a small va
 
 
 plt.figure(figsize=(10, 6))
-plt.imshow(np.abs(sx_filtered_db), aspect='auto', origin='lower', 
+plt.imshow(sx_filtered_db, aspect='auto', origin='lower', 
            extent=[0, tlength, freq_range[0], freq_range[1]])
 plt.colorbar(label='Magnitude')
 plt.title('Short-Time Fourier Transform (STFT) Magnitude (450Hz to 650Hz)')
