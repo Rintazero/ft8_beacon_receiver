@@ -23,7 +23,7 @@ SymT = rawSignalInfo.get("SymT")[0][0]
 # 构造 (线性)频移 载波
 
 fShift_t0_Hz = np.float64(0) # 初始频偏( \delta f(t=0) )
-fShift_k_Hzpsample = np.float64(2000/nsamples) # 频偏变化率
+fShift_k_Hzpsample = np.float64(2250/nsamples) # 频偏变化率
 print("fShift_t0_Hz:",fShift_t0_Hz,"fShift_k_Hzpsample:",fShift_k_Hzpsample)
 
 shiftCarrier = np.exp(2j*np.pi*fShift_t0_Hz*np.arange(nsamples)/fs + 2j*np.pi*fShift_k_Hzpsample*np.arange(nsamples)**2/(2*fs))
@@ -63,6 +63,7 @@ max_freqs = freq_range[0] + freqs[max_freq_indices]
 
 # 构造 同步序列
 SyncSeq = (np.array([3,1,4,0,6,5,2]) + 1) * SymBin
+SyncSeq = SyncSeq - np.mean(SyncSeq)
 syncCorrelationSeq = np.zeros( (3*NSyncSym + NDataSym) * time_osr )
 for i in range(len(syncCorrelationSeq)):
     if i < NSyncSym * time_osr:
@@ -79,17 +80,42 @@ for i in range(len(syncCorrelationSeq)):
 syncCorrelation = np.correlate(max_freqs - np.min(max_freqs), syncCorrelationSeq, mode='full')
 
 correlationPeakIndex = np.argmax(syncCorrelation)
-correlationPeakTimeBlockIndex = correlationPeakIndex - len(syncCorrelationSeq)
+correlationPeakTimeBlockIndex = correlationPeakIndex - len(syncCorrelationSeq) - 1
 print("correlationPeakTimeBlockIndex:",correlationPeakTimeBlockIndex)
 
 # 频偏估计
 fSyncSegment = np.zeros([3,NSyncSym*time_osr])
 
-fSyncSegment[0] = max_freqs[correlationPeakTimeBlockIndex + range(NSyncSym*time_osr)]
-fSyncSegment[1] = max_freqs[correlationPeakTimeBlockIndex + (NSyncSym + NDataSym//2)*time_osr + range(NSyncSym*time_osr)]
-fSyncSegment[2] = max_freqs[correlationPeakTimeBlockIndex + (2*NSyncSym + NDataSym)*time_osr + range(NSyncSym*time_osr)]
+samplesRefCount = [int(0),int(0),int(0)]
 
-fShift_est_k_Hzpsample = np.mean(np.mean(fSyncSegment[1]-fSyncSegment[0]) + np.mean(fSyncSegment[2]-fSyncSegment[1]))/((NSyncSym+NDataSym//2)*time_osr)/nsps
+for i in range(NSyncSym*time_osr):
+    if correlationPeakTimeBlockIndex + i < len(max_freqs):
+        fSyncSegment[0][i] = max_freqs[correlationPeakTimeBlockIndex + i]
+        samplesRefCount[0] += 1
+    else:
+        fSyncSegment[0][i] = 0
+
+for i in range(NSyncSym*time_osr):
+    if correlationPeakTimeBlockIndex + (NSyncSym + NDataSym//2)*time_osr + i < len(max_freqs):
+        fSyncSegment[1][i] = max_freqs[correlationPeakTimeBlockIndex + (NSyncSym + NDataSym//2)*time_osr + i]
+        samplesRefCount[1] += 1
+    else:
+        fSyncSegment[1][i] = 0
+
+for i in range(NSyncSym*time_osr):
+    if correlationPeakTimeBlockIndex + (2*NSyncSym + NDataSym)*time_osr + i < len(max_freqs):
+        fSyncSegment[2][i] = max_freqs[correlationPeakTimeBlockIndex + (2*NSyncSym + NDataSym)*time_osr + i]
+        samplesRefCount[2] += 1
+    else:
+        fSyncSegment[2][i] = 0
+
+
+est_temp_1 = np.mean(fSyncSegment[1][:min(samplesRefCount[0],samplesRefCount[1])]-fSyncSegment[0][:min(samplesRefCount[0],samplesRefCount[1])])
+est_temp_2 = np.mean(fSyncSegment[2][:min(samplesRefCount[1],samplesRefCount[2])]-fSyncSegment[1][:min(samplesRefCount[1],samplesRefCount[2])])
+
+fShift_est_k_Hzpsample = np.mean(est_temp_1+est_temp_2)/((NSyncSym+NDataSym//2)*time_osr)/nsps
+
+# fShift_est_k_Hzpsample = np.mean(np.mean(fSyncSegment[1]-fSyncSegment[0]) + np.mean(fSyncSegment[2]-fSyncSegment[1]))/((NSyncSym+NDataSym//2)*time_osr)/nsps
 print("fShift_est_k_Hzpsample:",fShift_est_k_Hzpsample)
 print("Linear Frequency Deviation Rate Error:{}Hz".format((fShift_k_Hzpsample - fShift_est_k_Hzpsample)*nsamples))
 
