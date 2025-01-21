@@ -8,6 +8,9 @@ freq_osr = int(2)
 NSyncSym = 7
 NDataSym = 58
 waterfall_freq_range = (500, 3050)
+ZscoreThreshold = 2
+MaxIterationNum = 400
+SNR = -15
 
 # load raw data
 rawSignalInfo = scipy.io.loadmat("./data/raw/waveInfo.mat")
@@ -33,7 +36,8 @@ shiftCarrier = np.exp(2j*np.pi*fShift_t0_Hz*np.arange(nsamples)/fs + 2j*np.pi*fS
 wave_shift = (waveRe + (1j) * waveIm) * shiftCarrier
 
 # 高斯噪声
-SNR = -10
+# np.random.seed(2)
+
 wave_power = np.mean(np.abs(wave)**2)
 noise_power = wave_power / (10**(SNR/10))
 
@@ -57,7 +61,61 @@ sx_filtered_real = np.real(sx_filtered)
 sx_filtered_imag = np.imag(sx_filtered)
 sx_filtered_power = sx_filtered_real**2 + sx_filtered_imag**2
 sx_filtered_db = 10 * np.log10(sx_filtered_power)
-max_freq_indices =  np.argmax(np.abs(sx_filtered), axis=0)
+
+# 最大幅值频率-时间 序列计算
+windowSum = np.zeros(sx_filtered_db.shape)
+for i in range(sx_filtered_db.shape[0]):
+    for j in range(sx_filtered_db.shape[1]):
+        if i < sx_filtered_db.shape[0] - freq_osr:
+            windowSum[i][j] = np.sum(sx_filtered_db[i:i+freq_osr,j])
+        else:
+            windowSum[i][j] = np.sum(sx_filtered_db[i:,j])
+windowIndices = np.argmax(windowSum,axis=0)
+max_freq_indices = np.zeros(sx_filtered_db.shape[1])
+for i in range(sx_filtered_db.shape[1]):
+    max_freq_indices[i] = windowIndices[i] + np.argmax(sx_filtered_db[windowIndices[i]:windowIndices[i]+freq_osr,i])
+max_freq_indices = max_freq_indices.astype(int)
+#print("sx_filtered_db len:{}\nsx_filtered_db shape:{}\n".format(len(sx_filtered_db),sx_filtered_db.shape))
+
+from scipy import stats
+from scipy.interpolate import interp1d
+from sklearn.linear_model import LinearRegression
+
+# Identify outliers in max_freq_indices using Z-score method
+
+iterationNum = 0
+while True:
+
+    # Fit a line to max_freq_indices using linear regression
+    
+
+    x = np.arange(len(max_freq_indices)).reshape(-1, 1)  # Reshape for sklearn
+    model = LinearRegression()
+    model.fit(x, max_freq_indices)
+    max_freq_indices_fitted = model.predict(x)
+    
+    # Identify outliers based on the fitted curve
+    residuals = max_freq_indices - max_freq_indices_fitted
+    z_scores = np.abs(stats.zscore(residuals))
+    outlier_indices = np.where(z_scores > ZscoreThreshold)[0]  # Using a threshold of 2 for Z-score
+    outliers = max_freq_indices[outlier_indices]
+
+    #print("Outlier indices:", outlier_indices)
+    #print("Outlier values:", outliers)
+
+    if len(outlier_indices) == 0 or iterationNum == MaxIterationNum:
+        break
+
+    #for i in range(len(outlier_indices)):
+    i = np.argmax(z_scores[outlier_indices])
+    sx_filtered_db[outliers[i],outlier_indices[i]] = np.min(sx_filtered_db)
+    windowIndices[outlier_indices[i]] = np.argmax(sx_filtered_db[:,outlier_indices[i]])
+    max_freq_indices[outlier_indices[i]] = windowIndices[outlier_indices[i]] + np.argmax(sx_filtered_db[windowIndices[outlier_indices[i]]:windowIndices[outlier_indices[i]]+freq_osr,outlier_indices[i]])
+
+    iterationNum += 1
+
+
+# max_freq_indices =  np.argmax(np.abs(sx_filtered), axis=0)
 max_freqs = freq_range[0] + freqs[max_freq_indices]
 
 
@@ -158,6 +216,7 @@ plt.xlim(0, tlength)
 plt.ylim(freq_range[0], freq_range[1])
 highlight_index = correlationPeakTimeBlockIndex + list(range(NSyncSym*time_osr))
 plt.scatter(highlight_index * SymT/time_osr, max_freqs[highlight_index], color='red', marker='o',zorder=2)
+plt.scatter(outlier_indices * SymT/time_osr, max_freqs[outlier_indices], color='green', marker='o',zorder=2)
 plt.grid()
 plt.show()
 
